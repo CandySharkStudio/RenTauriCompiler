@@ -1,16 +1,17 @@
 const std = @import("std");
 const builtin = @import("builtin");
-fn eq(a: []const u8, b: []const u8) bool {
-    return a.len == b.len and std.mem.eql(u8, a, b);
-}
+const util = @import("util.zig");
+const eq = util.eq;
+const setFile = util.setFile;
+const print = util.print;
+const input = util.input;
 fn panicHandler(msg: []const u8, ret_addr: ?usize) noreturn {
     @branchHint(.cold);
-    std.debug.print("Error: {s}\n", .{msg});
+    print("Error: {s}\n", .{msg});
     std.debug.defaultPanic(msg, ret_addr);
 }
-
-const default_aes_key: []const u8 = "Nim3VGmCjDBKMnaDqOX7RrsbP7/bz3zochCDuMuWMNI=";
 pub const panic = std.debug.FullPanic(panicHandler);
+const default_aes_key: []const u8 = "Nim3VGmCjDBKMnaDqOX7RrsbP7/bz3zochCDuMuWMNI=";
 fn showHelp() void {
     const help_msg =
         \\Ren'Tauri Compiler
@@ -31,12 +32,7 @@ fn showHelp() void {
         \\    -h, --help      输出帮助
         \\
     ;
-    std.debug.print("{s}\n", .{help_msg});
-}
-fn setFile(path: []const u8, content: []const u8) !void {
-    const file = try std.fs.cwd().createFile(path, .{});
-    defer file.close();
-    _ = try file.writeAll(content);
+    print("{s}\n", .{help_msg});
 }
 pub fn main() !void {
     var original_cp: u32 = 0;
@@ -54,10 +50,7 @@ pub fn main() !void {
     defer std.process.argsFree(allocator, args);
     if (args.len <= 1) {
         showHelp();
-        var buffer: [1024]u8 = undefined;
-        var reader = std.fs.File.stdin().reader(&buffer);
-        var stdin = &reader.interface;
-        _ = try stdin.takeDelimiterExclusive('\n');
+        _ = try input();
     } else {
         if (std.mem.eql(u8, args[1], "init")) {
             if (args.len > 2) {
@@ -70,7 +63,7 @@ pub fn main() !void {
         } else if (eq(args[1], "-h") or eq(args[1], "--help")) {
             showHelp();
         } else if (eq(args[1], "-v") or eq(args[1], "--version")) {
-            std.debug.print("version: 1.0.0", .{});
+            print("version: 1.0.0\n", .{});
         } else {
             const lua_path = args[1];
             const lua_ext = std.fs.path.extension(lua_path);
@@ -90,7 +83,7 @@ pub fn main() !void {
                     if (eq(op_ext, ".rrs")) {
                         output = args[i + 1];
                     } else {
-                        output = try std.fmt.allocPrint(arena.allocator(), "{s}.rrs", .{args[i + 1]});
+                        output = try std.fmt.allocPrint(allocator, "{s}.rrs", .{args[i + 1]});
                     }
                     i += 1;
                 } else if (eq(args[i], "-k") or eq(args[i], "--key")) {
@@ -99,7 +92,7 @@ pub fn main() !void {
                     i += 1;
                 }
             }
-            std.debug.print("LuaPath: {s}\nIsQuiet: {}\nOutputFile: {s}\nAES_Key: {s}", .{ lua_path, quiet, output, aes_key });
+            print("LuaPath: {s}\nIsQuiet: {}\nOutputFile: {s}\nAES_Key: {s}", .{ lua_path, quiet, output, aes_key });
         }
     }
 }
