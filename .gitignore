@@ -1,4 +1,2 @@
-zig-out/**/*
-!zig-out/bin/
-!zig-out/bin/main.lua
+zig-out/
 .zig-cache/
