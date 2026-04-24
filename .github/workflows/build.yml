@@ -5,7 +5,6 @@ on:
   push:
     branches: [main]
 
-
 jobs:
   publish-executable-file:
     permissions:
@@ -61,10 +60,12 @@ jobs:
         with:
           name: Bundle-${{matrix.platform}}-${{matrix.arch}}
           path: zig-out/bin/rtc
+          if-no-files-found: error
         if: ${{ matrix.platform != 'windows' }}
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: Bundle-${{matrix.platform}}-${{matrix.arch}}
           path: zig-out/bin/rtc.exe
+          if-no-files-found: error
         if: ${{ matrix.platform == 'windows' }}
