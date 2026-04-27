@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const TARGET_FUNCTIONS = [_][]const u8{
-    "loadFile",
+    "embedLuaFile",
     "Image",
     "Audio",
     "Video",
