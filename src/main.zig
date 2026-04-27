@@ -66,7 +66,7 @@ pub fn main() !void {
         } else if (eq(args[1], "-h") or eq(args[1], "--help")) {
             showHelp();
         } else if (eq(args[1], "-v") or eq(args[1], "--version")) {
-            print("version: 1.0.2\n", .{});
+            print("version: 1.0.3\n", .{});
         } else {
             const lua_path = args[1];
             const lua_ext = std.fs.path.extension(lua_path);
