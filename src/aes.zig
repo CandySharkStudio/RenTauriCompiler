@@ -1,4 +1,5 @@
 const std = @import("std");
+const stripLuaComments = @import("parser.zig").stripLuaComments;
 const Aes256 = std.crypto.core.aes.Aes256;
 const print = @import("util.zig").print;
 // 以 pkcs7 填充
@@ -43,11 +44,13 @@ pub fn packFiles(allocator: std.mem.Allocator, files: []const []const u8) ![]u8 
     const writer = list.writer(allocator);
 
     for (files) |file_path| {
-        const data = std.fs.cwd().readFileAlloc(allocator, file_path, std.math.maxInt(usize)) catch |err| {
+        var data = std.fs.cwd().readFileAlloc(allocator, file_path, std.math.maxInt(usize)) catch |err| {
             print("无法读取文件 {s}: {}\n", .{ file_path, err });
             return err;
         };
         defer allocator.free(data);
+        // 首先去除一遍所有注释
+        data = try stripLuaComments(data, allocator);
         // 写入路径长度
         try writer.writeInt(u32, @intCast(file_path.len), .little);
         // 写入路径
