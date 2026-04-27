@@ -66,7 +66,7 @@ pub fn main() !void {
         } else if (eq(args[1], "-h") or eq(args[1], "--help")) {
             showHelp();
         } else if (eq(args[1], "-v") or eq(args[1], "--version")) {
-            print("version: 1.0.0\n", .{});
+            print("version: 1.0.2\n", .{});
         } else {
             const lua_path = args[1];
             const lua_ext = std.fs.path.extension(lua_path);
@@ -99,7 +99,7 @@ pub fn main() !void {
             if (noquiet) print("正在提取 main.lua 文件...\n", .{});
             const lua_file = try getFile(lua_path);
             if (noquiet) print("已读取到 main.lua 文件，正在分析依赖...\n", .{});
-            const lua_par = try luaParser(lua_file, allocator);
+            const lua_par = try luaParser(lua_path, lua_file, allocator);
             if (noquiet) print("依赖分析完毕，正在分析 AES_KEY...\n", .{});
             const real_key = aes.base64DecodeFixed(aes_key) catch {
                 @panic("AES_KEY 解析失败！请检查你输入的 AES_KEY 是否正确。");

@@ -54,7 +54,7 @@ jobs:
         with:
           version: 0.15.2
       - name: Run build
-        run: zig build
+        run: zig build -Doptimize=ReleaseSmall
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:

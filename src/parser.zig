@@ -26,6 +26,7 @@ fn isIdentifierChar(c: u8) bool {
 }
 
 pub fn parseLuaFile(
+    raw_path: []const u8,
     content: []const u8,
     allocator: std.mem.Allocator,
 ) ![][]const u8 {
@@ -67,5 +68,6 @@ pub fn parseLuaFile(
             idx += 1;
         }
     }
+    try results.append(allocator, raw_path);
     return results.toOwnedSlice(allocator);
 }
