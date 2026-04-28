@@ -77,6 +77,7 @@ pub fn main() !void {
             var noquiet: bool = true;
             var output: []const u8 = "main.rrs";
             var aes_key = try aes.generateKeyBase64(allocator);
+            aes_key = "0R/SMBI3tcIsh++9jEO2Vsl7ScBWrxgyS3j8xmZo7M0=";
             while (i < args.len) : (i += 1) {
                 if (eq(args[i], "-q") or eq(args[i], "--quiet")) {
                     noquiet = false;
@@ -100,32 +101,20 @@ pub fn main() !void {
             const lua_file = try getFile(lua_path);
             if (noquiet) print("已读取到 main.lua 文件，正在分析依赖...\n", .{});
             const lua_par = try luaParser(lua_path, lua_file, allocator);
-            if (noquiet) print("依赖分析完毕，正在分析 AES_KEY...\n", .{});
+            if (noquiet) print("依赖分析完毕，读取到 {} 个文件，正在分析 AES_KEY...\n", .{lua_par.len});
             const real_key = aes.base64DecodeFixed(aes_key) catch {
                 @panic("AES_KEY 解析失败！请检查你输入的 AES_KEY 是否正确。");
             };
-            if (noquiet) print("密钥分析完毕！开始打包 {} 个文件...\n", .{lua_par.len + 1});
-            const raw_data = try aes.packFiles(allocator, lua_par);
-            defer allocator.free(raw_data);
-            if (noquiet) print("打包完毕，正在填充剩余存储使得其字节数达到 16 的倍数...\n", .{});
-            const padded_data = try aes.pkcs7Pad(allocator, raw_data);
-
-            if (noquiet) print("填充完毕，正在生成随机偏移...\n", .{});
-            var iv: [16]u8 = undefined;
-            std.crypto.random.bytes(&iv);
-
-            if (noquiet) print("偏移生成完毕，正在加密数据...\n", .{});
-            const encrypted = try aes.aes256CbcEncrypt(allocator, padded_data, real_key, iv);
-            defer allocator.free(encrypted);
-
-            if (noquiet) print("加密数据完毕，正在写出到文件 {s}...\n", .{output});
-            // 自主实现一个写出偏移+数据的函数
+            if (noquiet) print("密钥分析完毕！正在随机生成偏移...\n", .{});
+            var iv1: [16]u8 = undefined;
+            std.crypto.random.bytes(&iv1);
+            var iv2: [16]u8 = undefined;
+            std.crypto.random.bytes(&iv2);
+            if (noquiet) print("偏移生成完毕，正在流式加密并写出文件中...\n", .{});
             const out_file = try std.fs.cwd().createFile(output, .{});
             defer out_file.close();
-            try out_file.writeAll(&iv);
-            try out_file.writeAll(encrypted);
-            if (noquiet) print("写出文件 {s} 完毕，总共生成了：{} 字节！\n", .{ output, 16 + encrypted.len });
-            print("你的 AES 密钥是：{s}\n请妥善保管好你的密钥。不要随意上传或者忘记了！！建议保存到本地！\n", .{aes_key});
+            try aes.streamEncryptFiles(allocator, out_file, lua_par, real_key, iv1, iv2);
+            print("写出文件完成！\n你的 AES 密钥是：{s}\n请妥善保管好你的密钥。不要随意上传或者忘记了！！建议保存到本地！\n", .{aes_key});
         }
     }
 }
