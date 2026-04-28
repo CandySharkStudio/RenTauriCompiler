@@ -77,7 +77,6 @@ pub fn main() !void {
             var noquiet: bool = true;
             var output: []const u8 = "main.rrs";
             var aes_key = try aes.generateKeyBase64(allocator);
-            aes_key = "0R/SMBI3tcIsh++9jEO2Vsl7ScBWrxgyS3j8xmZo7M0=";
             while (i < args.len) : (i += 1) {
                 if (eq(args[i], "-q") or eq(args[i], "--quiet")) {
                     noquiet = false;
