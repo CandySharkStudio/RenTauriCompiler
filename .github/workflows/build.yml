@@ -60,11 +60,11 @@ jobs:
       - name: Replace version
         run: |
           if [[ "$(uname)" == "Darwin" ]]; then
-            sed -i '' '/print("version: /d'
-            sed -i '' '"--version")/aprint("version: ${{ github.event.inputs.version }}\n", .{});'
+            sed -i '' '/print("version: /d' src/main.zig
+            sed -i '' '"--version")/aprint("version: ${{ github.event.inputs.version }}\n", .{});' src/main.zig
           else
-            sed -i '/print("version: /d'
-            sed -i '"--version"/aprint("version: ${{ github.event.inputs.version }}\n", .{});'
+            sed -i '/print("version: /d' src/main.zig
+            sed -i '"--version"/aprint("version: ${{ github.event.inputs.version }}\n", .{});' src/main.zig
           fi
         shell: bash
       - name: Run build
