@@ -2,8 +2,12 @@ name: Build Ren-Tauri Compiler
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
+    inputs:
+      version:
+        description: version
+        required: true
+  # push:
+  #   branches: [main]
 
 jobs:
   publish-executable-file:
@@ -53,6 +57,16 @@ jobs:
         uses: mlugg/setup-zig@v2
         with:
           version: 0.15.2
+      - name: Replace version
+        run: |
+          if [[ "$(uname)" == "Darwin" ]]; then
+            sed -i '' '/print("version: /d'
+            sed -i '' '"--version")/aprint("version: ${{ github.event.inputs.version }}\n", .{});'
+          else
+            sed -i '/print("version: /d'
+            sed -i '"--version"/aprint("version: ${{ github.event.inputs.version }}\n", .{});'
+          fi
+        shell: bash
       - name: Run build
         run: zig build -Doptimize=ReleaseSmall
       - name: Upload artifact

@@ -181,37 +181,38 @@ pub fn parseLuaFile(
     allocator: std.mem.Allocator,
 ) ![][]const u8 {
     var results = try std.ArrayList([]const u8).initCapacity(allocator, std.math.maxInt(u8));
+    const strip_content = try stripLuaComments(content, allocator);
     var idx: usize = 0;
-    while (idx < content.len) {
+    while (idx < strip_content.len) {
         var matched: bool = false;
         for (TARGET_FUNCTIONS) |func_name| {
             // 这里已经在指针处进行判断了！
-            if (!std.mem.startsWith(u8, content[idx..], func_name)) {
+            if (!std.mem.startsWith(u8, strip_content[idx..], func_name)) {
                 continue;
             }
             // 定义一个 name_end 用来表示当前指针指向的 funcname 末尾。
             const name_end = idx + func_name.len;
-            if (idx > 0 and isIdentifierChar(content[idx - 1])) {
+            if (idx > 0 and isIdentifierChar(strip_content[idx - 1])) {
                 continue;
             }
-            if (name_end < content.len and isIdentifierChar(content[name_end])) {
+            if (name_end < strip_content.len and isIdentifierChar(strip_content[name_end])) {
                 continue;
             }
-            var pos = skipWhitespace(content, name_end);
-            if (pos >= content.len or content[pos] != '(') continue;
+            var pos = skipWhitespace(strip_content, name_end);
+            if (pos >= strip_content.len or strip_content[pos] != '(') continue;
             pos += 1;
-            pos = skipWhitespace(content, pos);
-            if (pos >= content.len) continue;
-            const quote_char = content[pos];
+            pos = skipWhitespace(strip_content, pos);
+            if (pos >= strip_content.len) continue;
+            const quote_char = strip_content[pos];
             // 需要判断单双引号
             if (quote_char != '\"' and quote_char != '\'') continue;
             pos += 1;
             const path_start = pos;
-            while (pos < content.len and content[pos] != quote_char) {
+            while (pos < strip_content.len and strip_content[pos] != quote_char) {
                 pos += 1;
             }
-            if (pos >= content.len) continue;
-            const file_path = content[path_start..pos];
+            if (pos >= strip_content.len) continue;
+            const file_path = strip_content[path_start..pos];
             try results.append(allocator, file_path);
             idx = pos;
             matched = true;
