@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const util = @import("util.zig");
-const aes = @import("aes.zig");
+const encrypt = @import("encrypt.zig");
 const eq = util.eq;
 const setFile = util.setFile;
 const getFile = util.getFile;
@@ -14,7 +14,6 @@ fn panicHandler(msg: []const u8, ret_addr: ?usize) noreturn {
 }
 pub const panic = std.debug.FullPanic(panicHandler);
 const default_aes_key: []const u8 = "Nim3VGmCjDBKMnaDqOX7RrsbP7/bz3zochCDuMuWMNI=";
-const Aes256 = std.crypto.core.aes.Aes256;
 fn showHelp() void {
     const help_msg =
         \\Ren'Tauri Compiler
@@ -76,7 +75,7 @@ pub fn main() !void {
             var i: usize = 2;
             var noquiet: bool = true;
             var output: []const u8 = "main.rrs";
-            var aes_key = try aes.generateKeyBase64(allocator);
+            var aes_key = try encrypt.generateKeyBase64(allocator);
             while (i < args.len) : (i += 1) {
                 if (eq(args[i], "-q") or eq(args[i], "--quiet")) {
                     noquiet = false;
@@ -101,7 +100,7 @@ pub fn main() !void {
             if (noquiet) print("已读取到 main.lua 文件，正在分析依赖...\n", .{});
             const lua_par = try luaParser(lua_path, lua_file, allocator);
             if (noquiet) print("依赖分析完毕，读取到 {} 个文件，正在分析 AES_KEY...\n", .{lua_par.len});
-            const real_key = aes.base64DecodeFixed(aes_key) catch {
+            const real_key = encrypt.base64DecodeFixed(aes_key) catch {
                 @panic("AES_KEY 解析失败！请检查你输入的 AES_KEY 是否正确。");
             };
             if (noquiet) print("密钥分析完毕！正在随机生成偏移...\n", .{});
@@ -112,7 +111,7 @@ pub fn main() !void {
             if (noquiet) print("偏移生成完毕，正在流式加密并写出文件中...\n", .{});
             const out_file = try std.fs.cwd().createFile(output, .{});
             defer out_file.close();
-            try aes.streamEncryptFiles(allocator, out_file, lua_par, real_key, iv1, iv2);
+            try encrypt.streamEncryptFiles(allocator, out_file, lua_par, real_key, iv1, iv2);
             print("写出文件完成！\n你的 AES 密钥是：{s}\n请妥善保管好你的密钥。不要随意上传或者忘记了！！建议保存到本地！\n", .{aes_key});
         }
     }
