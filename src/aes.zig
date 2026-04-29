@@ -21,7 +21,12 @@ const DataSource = union(enum) {
 pub fn base64DecodeFixed(input: []const u8) ![32]u8 {
     const Decoder = std.base64.standard.Decoder;
     var result: [32]u8 = undefined;
+    const size = try Decoder.calcSizeForSlice(input);
+    if (size != 32) {
+        return error.InvalidPadding;
+    }
     try Decoder.decode(&result, input);
+    if (result.len != 32) return error.InvalidPadding;
     return result;
 }
 // 随机生成密钥
@@ -104,7 +109,7 @@ pub fn streamEncryptFiles(allocator: std.mem.Allocator, out_file: std.fs.File, f
         }
         // var block: [BLOCK_SIZE]u8 = encrypted_dir.items[16 + offset ..][0..BLOCK_SIZE].*;
         aes1.encrypt(&block, &block);
-        @memcpy(dir_encrypted[(BLOCK_SIZE + offset)..], &block);
+        @memcpy(dir_encrypted[BLOCK_SIZE + offset ..][0..BLOCK_SIZE], &block);
         // encrypted_dir.items[16 + offset ..][0..BLOCK_SIZE].* = block;
         prev1 = block;
     }
