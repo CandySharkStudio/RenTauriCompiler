@@ -64,8 +64,9 @@ jobs:
             sed -i '' '/"--version")/aprint("version: ${{ github.event.inputs.version }}\n", .{});' src/main.zig
           else
             sed -i '/print("version: /d' src/main.zig
-            sed -i '/"--version"/aprint("version: ${{ github.event.inputs.version }}\n", .{});' src/main.zig
+            sed -i '/"--version")/aprint("version: ${{ github.event.inputs.version }}\n", .{});' src/main.zig
           fi
+          cat src/main.zig
         shell: bash
       - name: Run build
         run: zig build -Doptimize=ReleaseSmall
