@@ -2,10 +2,7 @@ const std = @import("std");
 
 const TARGET_FUNCTIONS = [_][]const u8{
     "embedLuaFile",
-    "Image",
-    "Audio",
-    "Video",
-    "Font",
+    "Resource",
 };
 fn isWhitespace(c: u8) bool {
     return c == ' ' or c == '\t' or c == '\n' or c == '\r';
