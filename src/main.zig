@@ -16,11 +16,11 @@ pub const panic = std.debug.FullPanic(panicHandler);
 const default_aes_key: []const u8 = "Nim3VGmCjDBKMnaDqOX7RrsbP7/bz3zochCDuMuWMNI=";
 fn showHelp() void {
     const help_msg =
-        \\Ren'Tauri Compiler
+        \\Ren'Rs Compiler
         \\
-        \\Usage: rtc [commands]
-        \\       rtc [options] <source>.lua
-        \\       rtc [help option]
+        \\Usage: rrc [commands]
+        \\       rrc [options] <source>.lua
+        \\       rrc [help option]
         \\Commands:
         \\    init    在当前目录下初始化一个 main.lua 文件！
         \\

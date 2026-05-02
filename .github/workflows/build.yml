@@ -1,4 +1,4 @@
-name: Build Ren-Tauri Compiler
+name: Build Ren-Rs Compiler
 
 on:
   workflow_dispatch:
