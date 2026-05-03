@@ -19,7 +19,7 @@ fn showHelp() void {
         \\Ren'Rs Compiler
         \\
         \\Usage: rrc [commands]
-        \\       rrc [options] <source>.lua
+        \\       rrc <source>.lua [options]
         \\       rrc [help option]
         \\Commands:
         \\    init    在当前目录下初始化一个 main.lua 文件！
@@ -32,7 +32,6 @@ fn showHelp() void {
         \\Help Option:
         \\    -v, --version   输出当前版本
         \\    -h, --help      输出帮助
-        \\
     ;
     print("{s}\n", .{help_msg});
 }
