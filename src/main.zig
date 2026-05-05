@@ -26,7 +26,7 @@ fn showHelp() void {
         \\
         \\Options:
         \\    -o, --output <NAME>.<.rrs>    输出最终编译产物
-        \\    -k, --key <AES_KEY>           手动指定 AES Key
+        \\    -k, --key <AES_KEY>           手动指定 AES Key（手动指定后将不输出密钥！）
         \\    -q, --quiet                   静默输出（不输出命令行日志）
         \\
         \\Help Option:
@@ -73,6 +73,7 @@ pub fn main() !void {
             }
             var i: usize = 2;
             var noquiet: bool = true;
+            var manual_key: bool = false;
             var output: []const u8 = "main.rrs";
             var aes_key = try encrypt.generateKeyBase64(allocator);
             while (i < args.len) : (i += 1) {
@@ -90,6 +91,7 @@ pub fn main() !void {
                 } else if (eq(args[i], "-k") or eq(args[i], "--key")) {
                     if (i + 1 >= args.len) @panic("The -k parameter must be follow by another arguments!");
                     aes_key = args[i + 1];
+                    manual_key = true;
                     i += 1;
                 }
             }
@@ -111,7 +113,8 @@ pub fn main() !void {
             const out_file = try std.fs.cwd().createFile(output, .{});
             defer out_file.close();
             try encrypt.streamEncryptFiles(allocator, out_file, lua_par, real_key, iv1, iv2);
-            print("写出文件完成！\n你的 AES 密钥是：{s}\n请妥善保管好你的密钥。不要随意上传或者忘记了！！建议保存到本地！\n", .{aes_key});
+            print("写出文件完成！\n", .{});
+            if (!manual_key) print("你的 AES 密钥是：{s}\n请妥善保管好你的密钥。不要随意上传或者忘记了！！建议保存到本地！\n", .{aes_key});
         }
     }
 }
