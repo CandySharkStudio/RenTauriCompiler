@@ -71,7 +71,7 @@ pub fn streamEncryptFiles(allocator: std.mem.Allocator, out_file: std.fs.File, f
             total_data_size += stat.size;
         }
     }
-    // 2. 计算 PKCS7 填充
+    // 计算 PKCS7 填充
     const pad_size: u8 = if (total_data_size % BLOCK_SIZE == 0) BLOCK_SIZE else @intCast(BLOCK_SIZE - (total_data_size % BLOCK_SIZE));
     const total_encrypted_size = total_data_size + pad_size;
     // 先加密写出所有文件基本头信息。
@@ -107,10 +107,8 @@ pub fn streamEncryptFiles(allocator: std.mem.Allocator, out_file: std.fs.File, f
         for (0..BLOCK_SIZE) |j| {
             block[j] = dir_padded[offset + j] ^ prev1[j];
         }
-        // var block: [BLOCK_SIZE]u8 = encrypted_dir.items[16 + offset ..][0..BLOCK_SIZE].*;
         aes1.encrypt(&block, &block);
         @memcpy(dir_encrypted[BLOCK_SIZE + offset ..][0..BLOCK_SIZE], &block);
-        // encrypted_dir.items[16 + offset ..][0..BLOCK_SIZE].* = block;
         prev1 = block;
     }
     // 写入文件头。
@@ -130,7 +128,7 @@ pub fn streamEncryptFiles(allocator: std.mem.Allocator, out_file: std.fs.File, f
     // 内存读取专用的偏移量指针
     var mem_offset: usize = 0;
     print("流式分析已完成 (总数据: {} B)，开始流式加密...\n", .{total_data_size});
-    // 5. 统一的流式加密循环（下列纯使用计算。。）
+    // 统一的流式加密循环（下列纯使用计算。。）
     while (global_read < total_encrypted_size) {
         var buf_offset: usize = 0;
         while (buf_offset < BUFFER_SIZE) {
@@ -171,7 +169,7 @@ pub fn streamEncryptFiles(allocator: std.mem.Allocator, out_file: std.fs.File, f
                 global_read += pad_to_write;
             }
         }
-        // 加密整块缓冲区逻辑不变
+        // 此处开始加密！
         for (0..buf_offset / BLOCK_SIZE) |i| {
             const offset = i * BLOCK_SIZE;
             for (0..BLOCK_SIZE) |j| {
