@@ -5,7 +5,7 @@ const print = @import("util.zig").print;
 const Aes256 = std.crypto.core.aes.Aes256;
 
 const BLOCK_SIZE: usize = 16;
-// 内存块大小
+// 内存块大小（使用 128 KB 以保证读入时的速度和倍率！）
 const BUFFER_SIZE: usize = 128 * 1024;
 // 文件头信息（路径+大小）
 const FileMeta = struct {
