@@ -6,7 +6,7 @@ const Aes256 = std.crypto.core.aes.Aes256;
 
 const BLOCK_SIZE: usize = 16;
 // 内存块大小
-const BUFFER_SIZE: usize = 16 * 1024;
+const BUFFER_SIZE: usize = 128 * 1024;
 // 文件头信息（路径+大小）
 const FileMeta = struct {
     path: []const u8,
@@ -124,6 +124,7 @@ pub fn streamEncryptFiles(allocator: std.mem.Allocator, out_file: std.fs.File, f
     const aes2 = Aes256.initEnc(key);
     var prev_block: [BLOCK_SIZE]u8 = iv2;
     var buf: [BUFFER_SIZE]u8 = undefined;
+    var ct_buf: [BUFFER_SIZE]u8 = undefined;
     var global_read: u64 = 0;
     var current_idx: usize = 0;
     // 内存读取专用的偏移量指针
@@ -171,15 +172,16 @@ pub fn streamEncryptFiles(allocator: std.mem.Allocator, out_file: std.fs.File, f
             }
         }
         // 加密整块缓冲区逻辑不变
-        for (0..BUFFER_SIZE / BLOCK_SIZE) |i| {
+        for (0..buf_offset / BLOCK_SIZE) |i| {
             const offset = i * BLOCK_SIZE;
             for (0..BLOCK_SIZE) |j| {
-                buf[offset + j] ^= prev_block[j];
+                ct_buf[offset + j] = buf[offset + j] ^ prev_block[j];
             }
-            var block: [BLOCK_SIZE]u8 = buf[offset..][0..BLOCK_SIZE].*;
+            var block: [BLOCK_SIZE]u8 = ct_buf[offset..][0..BLOCK_SIZE].*;
             aes2.encrypt(&block, &block);
-            try out_file.writeAll(&block);
+            ct_buf[offset..][0..BLOCK_SIZE].* = block;
             prev_block = block;
         }
+        try out_file.writeAll(ct_buf[0..buf_offset]);
     }
 }
