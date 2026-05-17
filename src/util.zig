@@ -24,7 +24,6 @@ pub fn input() ![]u8 {
     return output;
 }
 // 读取文件
-pub fn getFile(path: []const u8) ![]const u8 {
-    const allocator = std.heap.page_allocator;
+pub fn getFile(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
     return try std.fs.cwd().readFileAlloc(allocator, path, std.math.maxInt(usize));
 }

@@ -153,4 +153,16 @@ pub fn build(b: *std.Build) void {
     //
     // Lastly, the Zig build system is relatively simple and self-contained,
     // and reading its source code will allow you to master it.
+    //
+
+    // Run my dependency
+
+    const lua_dep = b.dependency("zlua", .{
+        .target = target,
+        .optimize = optimize,
+        .lang = .lua54,
+        .shared = false,
+    });
+
+    exe.root_module.addImport("zlua", lua_dep.module("zlua"));
 }

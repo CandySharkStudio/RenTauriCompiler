@@ -1,22 +1,77 @@
 const std = @import("std");
 const stripLuaComments = @import("parser.zig").stripLuaComments;
 const print = @import("util.zig").print;
+const ResultStruct = @import("ast.zig").ResultStruct;
 
 const Aes256 = std.crypto.core.aes.Aes256;
 
-const BLOCK_SIZE: usize = 16;
-// 内存块大小（使用 128 KB 以保证读入时的速度和倍率！）
-const BUFFER_SIZE: usize = 128 * 1024;
-// 文件头信息（路径+大小）
-const FileMeta = struct {
-    path: []const u8,
-    size: u64,
+const CbcStreamWriter = struct {
+    out_file: std.fs.File,
+    aes: std.crypto.core.aes.AesEncryptCtx(Aes256),
+    iv: [16]u8,
+    block_buffer: [16]u8,
+    block_len: usize,
+    out_buffer: [256 * 1024]u8,
+    out_len: usize,
+
+    fn init(out_file: std.fs.File, key: [32]u8, iv: [16]u8) CbcStreamWriter {
+        return .{
+            .out_file = out_file,
+            .aes = Aes256.initEnc(key),
+            .iv = iv,
+            .block_buffer = undefined,
+            .block_len = 0,
+            .out_buffer = undefined,
+            .out_len = 0,
+        };
+    }
+
+    fn write(self: *CbcStreamWriter, data: []const u8) !void {
+        for (data) |byte| {
+            self.block_buffer[self.block_len] = byte;
+            self.block_len += 1;
+            if (self.block_len == 16) {
+                try self.encrypt_block();
+            }
+        }
+    }
+
+    fn encrypt_block(self: *CbcStreamWriter) !void {
+        for (0..16) |j| self.block_buffer[j] ^= self.iv[j];
+        self.aes.encrypt(&self.block_buffer, &self.block_buffer);
+        self.iv = self.block_buffer;
+
+        @memcpy(self.out_buffer[self.out_len .. self.out_len + 16], &self.block_buffer);
+        self.out_len += 16;
+        self.block_len = 0;
+
+        if (self.out_len == self.out_buffer.len) {
+            try self.flush_out();
+        }
+    }
+
+    fn flush_out(self: *CbcStreamWriter) !void {
+        if (self.out_len > 0) {
+            try self.out_file.writeAll(self.out_buffer[0..self.out_len]);
+            self.out_len = 0;
+        }
+    }
+
+    fn finish(self: *CbcStreamWriter) !void {
+        const pad: u8 = @intCast(16 - self.block_len);
+        for (self.block_len..16) |j| self.block_buffer[j] = pad;
+
+        for (0..16) |j| self.block_buffer[j] ^= self.iv[j];
+        self.aes.encrypt(&self.block_buffer, &self.block_buffer);
+
+        @memcpy(self.out_buffer[self.out_len .. self.out_len + 16], &self.block_buffer);
+        self.out_len += 16;
+        self.block_len = 0;
+
+        try self.flush_out();
+    }
 };
-// 文件源（文件+内存）
-const DataSource = union(enum) {
-    file: std.fs.File,
-    memory: []const u8,
-};
+
 // 修复 Base64
 pub fn base64DecodeFixed(input: []const u8) ![32]u8 {
     const Decoder = std.base64.standard.Decoder;
@@ -37,149 +92,83 @@ pub fn generateKeyBase64(allocator: std.mem.Allocator) ![]const u8 {
     const encoded = try allocator.alloc(u8, Encoder.calcSize(key.len));
     return Encoder.encode(encoded, &key);
 }
-// 流式加密代码（流式加密采取读一点加密一点的原则，即使是面对超级大的文件也能无比从容的面对！）
-pub fn streamEncryptFiles(allocator: std.mem.Allocator, out_file: std.fs.File, files: []const []const u8, key: [32]u8, iv1: [16]u8, iv2: [16]u8) !void {
-    var metas = try std.ArrayList(FileMeta).initCapacity(allocator, std.math.maxInt(u8));
-    defer metas.deinit(allocator);
-    var sources = try std.ArrayList(DataSource).initCapacity(allocator, std.math.maxInt(u8));
-    defer {
-        for (sources.items) |src| {
-            switch (src) {
-                .file => |f| f.close(),
-                .memory => |data| allocator.free(data), // 释放预处理文本的内存
-            }
-        }
-        sources.deinit(allocator);
-    }
-    var total_data_size: u64 = 0;
-    for (files) |file_path| {
-        // 直接判断后缀看看这个是否需要去除注释。
-        if (std.mem.endsWith(u8, file_path, ".lua")) {
-            const raw_data = try std.fs.cwd().readFileAlloc(allocator, file_path, std.math.maxInt(usize));
-            errdefer allocator.free(raw_data);
-            const cleaned_data = try stripLuaComments(raw_data, allocator);
-            allocator.free(raw_data);
-            try metas.append(allocator, .{ .path = file_path, .size = cleaned_data.len });
-            try sources.append(allocator, .{ .memory = cleaned_data });
-            total_data_size += cleaned_data.len;
-        } else {
-            // --- 二进制逻辑：只拿元数据，准备流式句柄 ---
-            const stat = try std.fs.cwd().statFile(file_path);
-            const file = try std.fs.cwd().openFile(file_path, .{});
-            try metas.append(allocator, .{ .path = file_path, .size = stat.size });
-            try sources.append(allocator, .{ .file = file });
-            total_data_size += stat.size;
-        }
-    }
-    // 计算 PKCS7 填充
-    const pad_size: u8 = if (total_data_size % BLOCK_SIZE == 0) BLOCK_SIZE else @intCast(BLOCK_SIZE - (total_data_size % BLOCK_SIZE));
-    const total_encrypted_size = total_data_size + pad_size;
-    // 先加密写出所有文件基本头信息。
-    var dir_buffer = try std.ArrayList(u8).initCapacity(allocator, std.math.maxInt(u8));
-    defer dir_buffer.deinit(allocator);
-    const dir_writer = dir_buffer.writer(allocator);
-    try dir_writer.writeInt(u32, @intCast(metas.items.len), .little);
-    for (metas.items) |meta| {
-        try dir_writer.writeInt(u32, @intCast(meta.path.len), .little);
-        try dir_writer.writeAll(meta.path);
-        try dir_writer.writeInt(u64, meta.size, .little);
-    }
-    const dir_pad_size: u8 = if (dir_buffer.items.len % BLOCK_SIZE == 0) BLOCK_SIZE else @intCast(BLOCK_SIZE - (dir_buffer.items.len % BLOCK_SIZE));
-    // 拷贝内存
-    var dir_padded = try allocator.alloc(u8, dir_buffer.items.len + dir_pad_size);
-    defer allocator.free(dir_padded);
-    @memcpy(dir_padded[0..dir_buffer.items.len], dir_buffer.items);
-    @memset(dir_padded[dir_buffer.items.len..], dir_pad_size);
+// 流式加密代码（流式加密采取读一点加密一点的原则，即使是面对超级大的文件也能无比从容的面对。）
+// 只有二进制文件采用流式加密，文本文件的 AST 使用一次性加密。
+// 完成之后将其组合成 .rrs 独特格式！随后可以给各位自由进行分发。
+pub fn streamEncryptFiles(
+    allocator: std.mem.Allocator,
+    out_file: std.fs.File,
+    files: ResultStruct,
+    key: [32]u8,
+    iv1: [16]u8,
+    iv2: [16]u8,
+    iv3: [16]u8,
+) !void {
+    // 1. 将 CopywritingStruct 序列化为 JSON 字符串
+    const json_buf = std.json.fmt(files.copywriting, .{});
+    var string_allocator: std.io.Writer.Allocating = try .initCapacity(allocator, std.math.maxInt(u8));
+    defer string_allocator.deinit();
+    var string_writer = string_allocator.writer;
+    try json_buf.format(&string_writer);
 
-    // 为 iv1 分配独立内存
-    const dir_ct_len = dir_padded.len;
-    var dir_encrypted = try allocator.alloc(u8, BLOCK_SIZE + dir_ct_len);
-    defer allocator.free(dir_encrypted);
-    @memcpy(dir_encrypted[0..BLOCK_SIZE], &iv1);
+    const text_plain = string_writer.buffered();
+    const text_plain_len: u32 = @intCast(text_plain.len);
 
-    // 将 dir_pad_size 以及填充后的数字添加到列表。
-    // 开始使用 iv1 加密文件头信息
-    const aes1 = Aes256.initEnc(key);
-    var prev1: [BLOCK_SIZE]u8 = iv1;
-    for (0..dir_ct_len / BLOCK_SIZE) |i| {
-        const offset = i * BLOCK_SIZE;
-        var block: [BLOCK_SIZE]u8 = undefined;
-        for (0..BLOCK_SIZE) |j| {
-            block[j] = dir_padded[offset + j] ^ prev1[j];
-        }
-        aes1.encrypt(&block, &block);
-        @memcpy(dir_encrypted[BLOCK_SIZE + offset ..][0..BLOCK_SIZE], &block);
-        prev1 = block;
+    // 2. 预先获取所有二进制文件的大小 (用于第一阶段写入长度)
+    var bin_infos = try std.ArrayList(struct { name: []const u8, size: u64 }).initCapacity(allocator, std.math.maxInt(u8));
+    defer bin_infos.deinit(allocator);
+    for (files.binary_name.items) |bin_name| {
+        const bin_file = try std.fs.cwd().openFile(bin_name, .{});
+        defer bin_file.close();
+        const stat = try bin_file.stat();
+        try bin_infos.append(allocator, .{ .name = bin_name, .size = stat.size });
     }
-    // 写入文件头。
-    var buf_dir_encrypted: [4]u8 = undefined;
-    std.mem.writeInt(u32, &buf_dir_encrypted, @intCast(dir_encrypted.len), .little);
-    try out_file.writeAll(&buf_dir_encrypted);
-    try out_file.writeAll(dir_encrypted);
-    // 写入 iv2
-    try out_file.writeAll(&iv2);
-    // 随后再写入真实数据。
-    const aes2 = Aes256.initEnc(key);
-    var prev_block: [BLOCK_SIZE]u8 = iv2;
-    var buf: [BUFFER_SIZE]u8 = undefined;
-    var ct_buf: [BUFFER_SIZE]u8 = undefined;
-    var global_read: u64 = 0;
-    var current_idx: usize = 0;
-    // 内存读取专用的偏移量指针
-    var mem_offset: usize = 0;
-    print("流式分析已完成 (总数据: {} B)，开始流式加密...\n", .{total_data_size});
-    // 统一的流式加密循环（下列纯使用计算。。）
-    while (global_read < total_encrypted_size) {
-        var buf_offset: usize = 0;
-        while (buf_offset < BUFFER_SIZE) {
-            if (global_read < total_data_size) {
-                const remaining_in_buf = BUFFER_SIZE - buf_offset;
-                const current_source = &sources.items[current_idx];
-                var bytes_read: usize = 0;
-                // 根据源类型，采取不同的读取策略
-                switch (current_source.*) {
-                    .file => |*f| {
-                        bytes_read = f.read(buf[buf_offset..][0..remaining_in_buf]) catch return error.ReadFailed;
-                    },
-                    .memory => |data| {
-                        const left_to_read = data.len - mem_offset;
-                        const to_read = @min(left_to_read, remaining_in_buf);
-                        if (to_read > 0) {
-                            @memcpy(buf[buf_offset..][0..to_read], data[mem_offset..][0..to_read]);
-                            mem_offset += to_read;
-                        }
-                        bytes_read = to_read;
-                    },
-                }
-                if (bytes_read == 0) {
-                    // 当前源读完了，切换到下一个源
-                    mem_offset = 0; // 重置内存偏移量
-                    current_idx += 1;
-                } else {
-                    buf_offset += bytes_read;
-                    global_read += bytes_read;
-                }
-            } else {
-                // PKCS7 填充逻辑不变
-                const pad_left = total_encrypted_size - global_read;
-                if (pad_left == 0) break;
-                const pad_to_write = @min(pad_left, BUFFER_SIZE - buf_offset);
-                @memset(buf[buf_offset..][0..pad_to_write], pad_size);
-                buf_offset += pad_to_write;
-                global_read += pad_to_write;
-            }
-        }
-        // 此处开始加密！
-        for (0..buf_offset / BLOCK_SIZE) |i| {
-            const offset = i * BLOCK_SIZE;
-            for (0..BLOCK_SIZE) |j| {
-                ct_buf[offset + j] = buf[offset + j] ^ prev_block[j];
-            }
-            var block: [BLOCK_SIZE]u8 = ct_buf[offset..][0..BLOCK_SIZE].*;
-            aes2.encrypt(&block, &block);
-            ct_buf[offset..][0..BLOCK_SIZE].* = block;
-            prev_block = block;
-        }
-        try out_file.writeAll(ct_buf[0..buf_offset]);
+
+    // 3. 计算第一段密文长度
+    const block1_plain_len: u32 = @intCast(bin_infos.items.len * 5 + 16);
+    const block1_cipher_len: u32 = block1_plain_len + (16 - (block1_plain_len % 16));
+
+    // 4. 写入明文区：[IV1][密文1长度]
+    try out_file.writeAll(&iv1);
+    var buf_encrypt1_len: [4]u8 = undefined;
+    std.mem.writeInt(u32, &buf_encrypt1_len, @intCast(block1_cipher_len), .little);
+    try out_file.writeAll(&buf_encrypt1_len);
+
+    // 5. 加密第一段：[名称长度(1)][数据长度(4)]...[IV2(16)]
+    var stream1 = CbcStreamWriter.init(out_file, key, iv1);
+    for (bin_infos.items) |info| {
+        try stream1.write(&[_]u8{@intCast(info.name.len)});
+        var data_len_buf: [4]u8 = undefined;
+        std.mem.writeInt(u32, &data_len_buf, @intCast(info.size), .little);
+        try stream1.write(&data_len_buf);
     }
+    try stream1.write(&iv2);
+    try stream1.finish();
+
+    // 6. 加密第二段：[名称][流式读取的数据]...[IV3(16)][文本明文长度(4)]
+    var stream2 = CbcStreamWriter.init(out_file, key, iv2);
+    var read_buf: [256 * 1024]u8 = undefined; // 256KB 读取缓冲区，严格控制内存峰值
+    for (bin_infos.items) |info| {
+        try stream2.write(info.name);
+        const bin_file = try std.fs.cwd().openFile(info.name, .{});
+        defer bin_file.close();
+        while (true) {
+            const read = try bin_file.read(&read_buf);
+            if (read == 0) break;
+            try stream2.write(read_buf[0..read]);
+        }
+    }
+
+    try stream2.write(&iv3);
+    var text_plain_len_buf: [4]u8 = undefined;
+    std.mem.writeInt(u32, &text_plain_len_buf, text_plain_len, .little);
+    try stream2.write(&text_plain_len_buf);
+    try stream2.finish();
+
+    // 7. 加密第三段：[文本密文数据(JSON)]
+    var stream3 = CbcStreamWriter.init(out_file, key, iv3);
+    if (text_plain.len > 0) {
+        try stream3.write(text_plain);
+    }
+    try stream3.finish();
 }

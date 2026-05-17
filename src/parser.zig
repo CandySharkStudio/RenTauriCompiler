@@ -1,224 +1,97 @@
 const std = @import("std");
+const util = @import("util.zig");
 
-const TARGET_FUNCTIONS = [_][]const u8{
-    "embedLuaFile",
-    "Resource",
-};
-fn isWhitespace(c: u8) bool {
-    return c == ' ' or c == '\t' or c == '\n' or c == '\r';
+const EMBED_FUNCTION: []const u8 = "embedLuaFile";
+// 查找该字符是否为字母或下划线
+fn isIdentChar(b: u8) bool {
+    return std.ascii.isAlphanumeric(b) or b == '_';
 }
-fn skipWhitespace(content: []const u8, start: usize) usize {
+
+// 查找一个完整的单词
+fn findWord(s: []const u8, word: []const u8) anyerror!usize {
+    var i: usize = 0;
+    while (i + word.len <= s.len) {
+        if (std.mem.eql(u8, s[i .. i + word.len], word)) {
+            const prev_ok = i == 0 or !isIdentChar(s[i - 1]);
+            const next_ok = i + word.len >= s.len or !isIdentChar(s[i + word.len]);
+            if (prev_ok and next_ok) {
+                return i;
+            }
+        }
+        i += 1;
+    }
+    return error.CannotFindAnyWord;
+}
+
+// 跳过空白字符 2
+fn skipWs2(text: []const u8, start: usize) usize {
     var i = start;
-    while (i < content.len and isWhitespace(content[i])) {
+    while (i < text.len and std.ascii.isWhitespace(text[i])) {
         i += 1;
     }
     return i;
 }
 
-fn isIdentifierChar(c: u8) bool {
-    return (c >= 'a' and c <= 'z') or
-        (c >= 'A' and c <= 'Z') or
-        (c >= '0' and c <= '9') or
-        c == '_';
-}
-
-fn countLongBracketOpen(s: []const u8) i32 {
-    if (s.len < 2 or s[0] != '[') return -1;
-    var level: i32 = 0;
-    var i: usize = 1;
-    while (i < s.len and s[i] == '=') {
-        level += 1;
-        i += 1;
+// 简单字符串解析
+fn readStringLiteral(chars: []const u8, idx: *usize) anyerror![]const u8 {
+    var c = chars;
+    const bracketType = c[0];
+    c = c[1..];
+    idx.* += 1;
+    if (bracketType != '"' and bracketType != '\'') {
+        return error.MyError;
     }
-    if (i < s.len and s[i] == '[') return level;
-    return -1;
-}
-
-fn matchLongBracketClose(s: []const u8, level: i32) bool {
-    if (s.len < 2 or s[0] != ']') return false;
-    var i: usize = 1;
-    var matched: i32 = 0;
-    while (i < s.len and s[i] == '=') {
-        matched += 1;
-        i += 1;
+    var idx2: u8 = 0;
+    while (true) {
+        if (idx2 < c.len) {
+            if (c[idx2] == bracketType) {
+                break;
+            }
+            idx2 += 1;
+        } else {
+            return error.CannotReadStringLiteral;
+        }
     }
-    return i < s.len and s[i] == ']' and matched == level;
+    idx.* += idx2 + 1;
+    return c[0..idx2];
 }
-
-/// 去除所有注释，保留字符串内容
-fn stripCommentsPass(input: []const u8, allocator: std.mem.Allocator) ![]u8 {
-    var output = try std.ArrayList(u8).initCapacity(allocator, std.math.maxInt(u8));
-    var i: usize = 0;
-    while (i < input.len) {
-        // 单行注释
-        if (input[i] == '-' and i + 1 < input.len and input[i + 1] == '-') {
-            i += 2;
-            // 如果是长注释
-            if (i < input.len and input[i] == '[') {
-                const level = countLongBracketOpen(input[i..]);
-                if (level >= 0) {
-                    const level_usize: usize = @intCast(level);
-                    i += level_usize + 2;
-                    while (i < input.len) {
-                        if (input[i] == ']' and matchLongBracketClose(input[i..], level)) {
-                            i += level_usize + 2; // 跳过 ]=*]
-                            break;
-                        }
-                        i += 1;
-                    }
-                    continue;
-                }
-            }
-            while (i < input.len and input[i] != '\n') {
-                i += 1;
-            }
-            continue;
-        }
-        // 单双引号里的 -- 注释
-        if (input[i] == '"') {
-            try output.append(allocator, '"');
-            i += 1;
-            while (i < input.len and input[i] != '"') {
-                if (input[i] == '\\' and i + 1 < input.len) {
-                    try output.append(allocator, input[i]);
-                    i += 1;
-                }
-                try output.append(allocator, input[i]);
-                i += 1;
-            }
-            if (i < input.len) {
-                try output.append(allocator, '"');
-                i += 1;
-            }
-            continue;
-        }
-        if (input[i] == '\'') {
-            try output.append(allocator, '\'');
-            i += 1;
-            while (i < input.len and input[i] != '\'') {
-                if (input[i] == '\\' and i + 1 < input.len) {
-                    try output.append(allocator, input[i]);
-                    i += 1;
-                }
-                try output.append(allocator, input[i]);
-                i += 1;
-            }
-            if (i < input.len) {
-                try output.append(allocator, '\'');
-                i += 1;
-            }
-            continue;
-        }
-        // 匹配 [[]] 的字符串，包括里面有 = 号时的 -- 注释不予去除！
-        if (input[i] == '[') {
-            const level = countLongBracketOpen(input[i..]);
-            if (level >= 0) {
-                const level_usize: usize = @intCast(level);
-                const open_len = level_usize + 2;
-                try output.appendSlice(allocator, input[i .. i + open_len]);
-                i += open_len;
-                while (i < input.len) {
-                    if (input[i] == ']' and matchLongBracketClose(input[i..], level)) {
-                        const close_len = level_usize + 2;
-                        try output.appendSlice(allocator, input[i .. i + close_len]);
-                        i += close_len;
-                        break;
-                    }
-                    try output.append(allocator, input[i]);
-                    i += 1;
-                }
-                continue;
-            }
-        }
-        try output.append(allocator, input[i]);
-        i += 1;
+fn getEmbedArg(line: []const u8) anyerror![]const u8 {
+    const pos = try findWord(line, EMBED_FUNCTION);
+    var chars = line[pos + EMBED_FUNCTION.len ..];
+    const idx1 = skipWs2(chars, 0);
+    chars = chars[idx1..];
+    if (chars[0] != '(') {
+        return error.CannotParseEmbedArgs;
     }
-
-    return try output.toOwnedSlice(allocator);
-}
-
-// 去除空白行
-fn stripBlankLines(input: []const u8, allocator: std.mem.Allocator) ![]u8 {
-    var output = try std.ArrayList(u8).initCapacity(allocator, std.math.maxInt(u8));
-    var line_start: usize = 0;
-    var i: usize = 0;
-    while (i <= input.len) {
-        if (i == input.len or input[i] == '\n') {
-            const line = input[line_start..i];
-            var is_blank = true;
-            for (line) |c| {
-                if (!isWhitespace(c)) {
-                    is_blank = false;
-                    break;
-                }
-            }
-            if (!is_blank) {
-                try output.appendSlice(allocator, line);
-                if (i < input.len) try output.append(allocator, '\n');
-            }
-            line_start = i + 1;
-        }
-        i += 1;
-    }
-    // 去除末尾可能出现的空行
-    if (output.items.len > 0 and output.items[output.items.len - 1] == '\n') {
-        _ = output.pop();
-    }
-    return try output.toOwnedSlice(allocator);
-}
-
-pub fn stripLuaComments(input: []const u8, allocator: std.mem.Allocator) ![]u8 {
-    const no_comments = try stripCommentsPass(input, allocator);
-    defer allocator.free(no_comments);
-    return stripBlankLines(no_comments, allocator);
-}
-pub fn parseLuaFile(
-    raw_path: []const u8,
-    content: []const u8,
-    allocator: std.mem.Allocator,
-) ![][]const u8 {
-    var results = try std.ArrayList([]const u8).initCapacity(allocator, std.math.maxInt(u8));
-    const strip_content = try stripLuaComments(content, allocator);
+    chars = chars[1..];
+    const idx2 = skipWs2(chars, 0);
+    chars = chars[idx2..];
     var idx: usize = 0;
-    while (idx < strip_content.len) {
-        var matched: bool = false;
-        for (TARGET_FUNCTIONS) |func_name| {
-            // 这里已经在指针处进行判断了！
-            if (!std.mem.startsWith(u8, strip_content[idx..], func_name)) {
-                continue;
-            }
-            // 定义一个 name_end 用来表示当前指针指向的 funcname 末尾。
-            const name_end = idx + func_name.len;
-            if (idx > 0 and isIdentifierChar(strip_content[idx - 1])) {
-                continue;
-            }
-            if (name_end < strip_content.len and isIdentifierChar(strip_content[name_end])) {
-                continue;
-            }
-            var pos = skipWhitespace(strip_content, name_end);
-            if (pos >= strip_content.len or strip_content[pos] != '(') continue;
-            pos += 1;
-            pos = skipWhitespace(strip_content, pos);
-            if (pos >= strip_content.len) continue;
-            const quote_char = strip_content[pos];
-            // 需要判断单双引号
-            if (quote_char != '\"' and quote_char != '\'') continue;
-            pos += 1;
-            const path_start = pos;
-            while (pos < strip_content.len and strip_content[pos] != quote_char) {
-                pos += 1;
-            }
-            if (pos >= strip_content.len) continue;
-            const file_path = strip_content[path_start..pos];
-            try results.append(allocator, file_path);
-            idx = pos;
-            matched = true;
-            break;
-        }
-        if (!matched) {
-            idx += 1;
+    const filename = try readStringLiteral(chars, &idx);
+    chars = chars[idx..];
+    const idx3 = skipWs2(chars, 0);
+    chars = chars[idx3..];
+    if (chars[0] != ')') {
+        return error.CannotParseEmbedArgs;
+    }
+    return filename;
+}
+
+pub fn parseLuaFile(
+    allocator: std.mem.Allocator,
+    lua_content: []const u8,
+) ![]const u8 {
+    var lua_array = try std.ArrayList([]const u8).initCapacity(allocator, std.math.maxInt(u8));
+    var line_iter = std.mem.splitScalar(u8, lua_content, '\n');
+    while (line_iter.next()) |line| {
+        const rerr = getEmbedArg(line);
+        if (rerr) |res| {
+            const g = try util.getFile(allocator, res);
+            try lua_array.append(allocator, g);
+        } else |_| {
+            try lua_array.append(allocator, line);
         }
     }
-    try results.append(allocator, raw_path);
-    return results.toOwnedSlice(allocator);
+    const lua_file = try std.mem.join(allocator, "\n", lua_array.items);
+    return lua_file;
 }
